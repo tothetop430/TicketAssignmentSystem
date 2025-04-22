@@ -24,7 +24,18 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
-  // Fetch tickets
+  // Fetch all tickets for counting purposes
+  const { data: allTickets = [] } = useQuery({
+    queryKey: ['/api/tickets', 'all'],
+    queryFn: async () => {
+      const response = await fetch('/api/tickets', { credentials: 'include' });
+      if (!response.ok) throw new Error('Failed to fetch all tickets');
+      return response.json();
+    },
+    refetchInterval: 2000, // Refetch tickets every 2 seconds
+  });
+
+  // Fetch filtered tickets based on status
   const { data: tickets = [], isLoading } = useQuery({
     queryKey: ['/api/tickets', statusFilter],
     queryFn: async ({ queryKey }) => {
@@ -277,7 +288,7 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
               >
                 All Tickets
                 <span className="ml-1 bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-xs">
-                  {tickets.length}
+                  {allTickets.length}
                 </span>
               </button>
               <button 
@@ -290,7 +301,7 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
               >
                 Open
                 <span className="ml-1 bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-xs">
-                  {tickets.filter((t: any) => t.status !== "completed").length}
+                  {allTickets.filter((t: any) => t.status !== "completed").length}
                 </span>
               </button>
               <button 
@@ -303,7 +314,7 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
               >
                 Closed
                 <span className="ml-1 bg-gray-100 text-gray-700 px-2 py-0.5 rounded-full text-xs">
-                  {tickets.filter((t: any) => t.status === "completed").length}
+                  {allTickets.filter((t: any) => t.status === "completed").length}
                 </span>
               </button>
             </nav>
@@ -409,7 +420,13 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
           <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
             <div>
               <p className="text-sm text-gray-700">
-                Showing <span className="font-medium">1</span> to <span className="font-medium">{filteredTickets.length}</span> of <span className="font-medium">{tickets.length}</span> tickets
+                Showing <span className="font-medium">1</span> to <span className="font-medium">{filteredTickets.length}</span> of <span className="font-medium">{
+                  activeTab === "all" 
+                    ? allTickets.length 
+                    : activeTab === "open" 
+                      ? allTickets.filter(t => t.status !== "completed").length 
+                      : allTickets.filter(t => t.status === "completed").length
+                }</span> tickets
               </p>
             </div>
             <div>
