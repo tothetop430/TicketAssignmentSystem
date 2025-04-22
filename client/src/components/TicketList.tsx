@@ -33,9 +33,12 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
         ? '/api/tickets' 
         : `/api/tickets?status=${status}`;
       
+      console.log("Fetching tickets with URL:", url);
       const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch tickets');
-      return response.json();
+      const data = await response.json();
+      console.log("Received tickets:", data);
+      return data;
     },
     refetchInterval: 2000, // Refetch tickets every 2 seconds
   });
@@ -131,7 +134,18 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
   // Handle tab change
   const handleTabChange = (status: string) => {
     setActiveTab(status);
-    setStatusFilter(status === "all" ? "all" : status === "open" ? "pending,assigned" : "completed");
+    console.log("Changing tab to:", status);
+    
+    // Separate tab UI from actual status filter values
+    let filter = "all";
+    if (status === "open") {
+      filter = "pending,assigned";
+    } else if (status === "closed") {
+      filter = "completed";
+    }
+    
+    console.log("Setting status filter to:", filter);
+    setStatusFilter(filter);
   };
 
   // Filter tickets based on search query

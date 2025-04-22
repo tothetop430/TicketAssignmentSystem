@@ -68,13 +68,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let filteredTickets = tickets;
       
       if (status && status !== "all") {
+        console.log("Filtering tickets by status:", status);
+        
         // Check if this is a comma-separated list of statuses
         if (status.includes(',')) {
-          const statusList = status.split(',');
-          filteredTickets = tickets.filter(ticket => statusList.includes(ticket.status));
+          const statusList = status.split(',').map(s => s.trim());
+          console.log("Status list:", statusList);
+          
+          filteredTickets = tickets.filter(ticket => {
+            const result = statusList.includes(ticket.status);
+            console.log(`Ticket ${ticket.id} has status ${ticket.status}, include: ${result}`);
+            return result;
+          });
         } else {
           filteredTickets = tickets.filter(ticket => ticket.status === status);
         }
+        
+        console.log(`Filtered ${tickets.length} tickets to ${filteredTickets.length} tickets`);
       }
       
       // Add team member details for assigned tickets
