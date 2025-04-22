@@ -2,8 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 
 export default function TeamMembersList() {
   // Fetch team members
-  const { data: teamMembers = [], isLoading } = useQuery({
+  const { data: teamMembers = [], isLoading } = useQuery<any[]>({
     queryKey: ['/api/team-members'],
+    refetchInterval: 2000, // Refetch team members every 2 seconds
   });
 
   if (isLoading) {

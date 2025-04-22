@@ -36,7 +36,8 @@ export default function TicketList({ onViewTicket }: TicketListProps) {
       const response = await fetch(url, { credentials: 'include' });
       if (!response.ok) throw new Error('Failed to fetch tickets');
       return response.json();
-    }
+    },
+    refetchInterval: 2000, // Refetch tickets every 2 seconds
   });
 
   // Assign ticket mutation

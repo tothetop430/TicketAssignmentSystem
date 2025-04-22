@@ -92,8 +92,9 @@ export default function TicketForm({ availableSkills }: TicketFormProps) {
       });
       setSelectedSkills([]);
       
-      // Invalidate tickets query to refresh list
+      // Invalidate queries to refresh lists
       queryClient.invalidateQueries({ queryKey: ['/api/tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/team-members'] });
       
       toast({
         title: "Ticket Created",
