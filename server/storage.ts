@@ -1,6 +1,8 @@
 import { teamMembers, tickets, activityLogs } from "@shared/schema";
 import type { TeamMember, Ticket, ActivityLog, InsertTeamMember, InsertTicket, InsertActivityLog } from "@shared/schema";
 import { availableSkills } from "@shared/schema";
+import { db } from "./db";
+import { eq, and, desc } from "drizzle-orm";
 
 // Interface for storage operations
 export interface IStorage {
@@ -38,89 +40,86 @@ const initialTeamMembers: InsertTeamMember[] = [
   { name: "Taylor Green", skills: ["Frontend", "Backend", "Database"], initials: "TG" },
 ];
 
-export class MemStorage implements IStorage {
-  private teamMembers: Map<number, TeamMember>;
-  private tickets: Map<number, Ticket>;
-  private activityLogs: Map<number, ActivityLog>;
-  private teamMemberCurrentId: number;
-  private ticketCurrentId: number;
-  private activityLogCurrentId: number;
-
+export class DatabaseStorage implements IStorage {
   constructor() {
-    this.teamMembers = new Map();
-    this.tickets = new Map();
-    this.activityLogs = new Map();
-    this.teamMemberCurrentId = 1;
-    this.ticketCurrentId = 1;
-    this.activityLogCurrentId = 1;
+    // Seed initial team members if they don't exist
+    this.seedInitialTeamMembers();
+  }
 
-    // Populate initial team members
-    initialTeamMembers.forEach(member => {
-      this.createTeamMember(member);
-    });
+  private async seedInitialTeamMembers() {
+    const existingMembers = await db.select().from(teamMembers);
+    
+    if (existingMembers.length === 0) {
+      // No members found, insert initial team members
+      for (const member of initialTeamMembers) {
+        await db.insert(teamMembers).values(member);
+      }
+    }
   }
 
   // Team Member operations
   async getTeamMembers(): Promise<TeamMember[]> {
-    return Array.from(this.teamMembers.values());
+    return db.select().from(teamMembers);
   }
 
   async getTeamMember(id: number): Promise<TeamMember | undefined> {
-    return this.teamMembers.get(id);
+    const [member] = await db.select().from(teamMembers).where(eq(teamMembers.id, id));
+    return member;
   }
 
   async createTeamMember(teamMember: InsertTeamMember): Promise<TeamMember> {
-    const id = this.teamMemberCurrentId++;
-    const newMember: TeamMember = { ...teamMember, id };
-    this.teamMembers.set(id, newMember);
+    const [newMember] = await db.insert(teamMembers).values(teamMember).returning();
     return newMember;
   }
 
   // Ticket operations
   async getTickets(): Promise<Ticket[]> {
-    return Array.from(this.tickets.values());
+    return db.select().from(tickets);
   }
 
   async getTicket(id: number): Promise<Ticket | undefined> {
-    return this.tickets.get(id);
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
+    return ticket;
   }
 
   async createTicket(ticket: InsertTicket): Promise<Ticket> {
-    const id = this.ticketCurrentId++;
     const now = new Date();
     
-    const newTicket: Ticket = {
+    // Prepare ticket data
+    const ticketData = {
       ...ticket,
-      id,
       status: "pending",
       createdAt: now,
       assignedAt: ticket.assignedTo ? now : undefined,
-      completedAt: undefined
     };
     
-    this.tickets.set(id, newTicket);
+    // Insert the ticket and get the newly created ticket
+    const [newTicket] = await db.insert(tickets).values(ticketData).returning();
 
     // Add creation activity log
     await this.addActivityLog({
-      ticketId: id,
+      ticketId: newTicket.id,
       action: "created",
       details: { ticket: newTicket }
     });
 
     // If assignedTo is provided, automatically assign the ticket
     if (ticket.assignedTo) {
-      return this.assignTicket(id, ticket.assignedTo);
+      return this.assignTicket(newTicket.id, ticket.assignedTo);
     }
 
     return newTicket;
   }
 
   async updateTicket(id: number, updates: Partial<Ticket>): Promise<Ticket | undefined> {
-    const ticket = this.tickets.get(id);
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
     if (!ticket) return undefined;
 
-    const updatedTicket = { ...ticket, ...updates };
-    this.tickets.set(id, updatedTicket);
+    const [updatedTicket] = await db
+      .update(tickets)
+      .set(updates)
+      .where(eq(tickets.id, id))
+      .returning();
 
     // Add update activity log
     await this.addActivityLog({
@@ -133,23 +132,24 @@ export class MemStorage implements IStorage {
   }
 
   async deleteTicket(id: number): Promise<boolean> {
-    const deleted = this.tickets.delete(id);
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, id));
+    if (!ticket) return false;
     
-    if (deleted) {
-      // Add deletion activity log
-      await this.addActivityLog({
-        ticketId: id,
-        action: "deleted",
-        details: { ticketId: id }
-      });
-    }
+    await db.delete(tickets).where(eq(tickets.id, id));
     
-    return deleted;
+    // Add deletion activity log
+    await this.addActivityLog({
+      ticketId: id,
+      action: "deleted",
+      details: { ticketId: id }
+    });
+    
+    return true;
   }
 
   // Assignment logic
   async assignTicket(ticketId: number, memberId?: number): Promise<Ticket | undefined> {
-    const ticket = this.tickets.get(ticketId);
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
     if (!ticket) return undefined;
 
     // If no member ID is provided, find the best match based on skills
@@ -160,18 +160,21 @@ export class MemStorage implements IStorage {
     }
 
     // Check if member exists
-    const member = this.teamMembers.get(memberId);
+    const [member] = await db.select().from(teamMembers).where(eq(teamMembers.id, memberId));
     if (!member) return ticket;
 
     const now = new Date();
-    const updatedTicket: Ticket = {
-      ...ticket,
+    const updateData = {
       assignedTo: memberId,
       assignedAt: now,
       status: "assigned"
     };
 
-    this.tickets.set(ticketId, updatedTicket);
+    const [updatedTicket] = await db
+      .update(tickets)
+      .set(updateData)
+      .where(eq(tickets.id, ticketId))
+      .returning();
 
     // Add assignment activity log
     await this.addActivityLog({
@@ -184,26 +187,36 @@ export class MemStorage implements IStorage {
   }
 
   async completeTicket(ticketId: number): Promise<Ticket | undefined> {
-    const ticket = this.tickets.get(ticketId);
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
     if (!ticket) return undefined;
 
     const now = new Date();
-    const updatedTicket: Ticket = {
-      ...ticket,
+    const updateData = {
       completedAt: now,
       status: "completed"
     };
 
-    this.tickets.set(ticketId, updatedTicket);
+    const [updatedTicket] = await db
+      .update(tickets)
+      .set(updateData)
+      .where(eq(tickets.id, ticketId))
+      .returning();
 
     // Add completion activity log
-    const member = ticket.assignedTo ? this.teamMembers.get(ticket.assignedTo) : undefined;
+    let completedBy = "Unknown";
+    if (ticket.assignedTo) {
+      const [member] = await db.select().from(teamMembers).where(eq(teamMembers.id, ticket.assignedTo));
+      if (member) {
+        completedBy = member.name;
+      }
+    }
+    
     await this.addActivityLog({
       ticketId,
       action: "completed",
       details: { 
         completedAt: now,
-        completedBy: member ? member.name : "Unknown"
+        completedBy
       }
     });
 
@@ -211,16 +224,19 @@ export class MemStorage implements IStorage {
   }
 
   async reopenTicket(ticketId: number): Promise<Ticket | undefined> {
-    const ticket = this.tickets.get(ticketId);
+    const [ticket] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
     if (!ticket) return undefined;
 
-    const updatedTicket: Ticket = {
-      ...ticket,
-      completedAt: undefined,
+    const updateData = {
+      completedAt: null,
       status: ticket.assignedTo ? "assigned" : "pending"
     };
 
-    this.tickets.set(ticketId, updatedTicket);
+    const [updatedTicket] = await db
+      .update(tickets)
+      .set(updateData)
+      .where(eq(tickets.id, ticketId))
+      .returning();
 
     // Add reopen activity log
     await this.addActivityLog({
@@ -234,24 +250,19 @@ export class MemStorage implements IStorage {
 
   // Activity log operations
   async getActivityLogs(ticketId: number): Promise<ActivityLog[]> {
-    return Array.from(this.activityLogs.values())
-      .filter(log => log.ticketId === ticketId)
-      .sort((a, b) => {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      });
+    return db
+      .select()
+      .from(activityLogs)
+      .where(eq(activityLogs.ticketId, ticketId))
+      .orderBy(desc(activityLogs.timestamp));
   }
 
   async addActivityLog(log: InsertActivityLog): Promise<ActivityLog> {
-    const id = this.activityLogCurrentId++;
-    const now = new Date();
+    const [newLog] = await db
+      .insert(activityLogs)
+      .values(log)
+      .returning();
     
-    const newLog: ActivityLog = {
-      ...log,
-      id,
-      timestamp: now
-    };
-    
-    this.activityLogs.set(id, newLog);
     return newLog;
   }
 
@@ -262,9 +273,19 @@ export class MemStorage implements IStorage {
     const members = await this.getTeamMembers();
     
     // Count assigned tickets per member for load balancing
+    const assignedTickets = await db
+      .select()
+      .from(tickets)
+      .where(
+        and(
+          tickets.status !== "completed",
+          tickets.assignedTo !== null
+        )
+      );
+    
     const assignedTicketCount = new Map<number, number>();
-    for (const ticket of this.tickets.values()) {
-      if (ticket.assignedTo && ticket.status !== "completed") {
+    for (const ticket of assignedTickets) {
+      if (ticket.assignedTo) {
         const count = assignedTicketCount.get(ticket.assignedTo) || 0;
         assignedTicketCount.set(ticket.assignedTo, count + 1);
       }
@@ -297,4 +318,5 @@ export class MemStorage implements IStorage {
   }
 }
 
-export const storage = new MemStorage();
+// Use the database storage implementation
+export const storage = new DatabaseStorage();
