@@ -278,8 +278,8 @@ export class DatabaseStorage implements IStorage {
       .from(tickets)
       .where(
         and(
-          tickets.status !== "completed",
-          tickets.assignedTo !== null
+          tickets.status.notEquals("completed"),
+          tickets.assignedTo.isNotNull
         )
       );
     
