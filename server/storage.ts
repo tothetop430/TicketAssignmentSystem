@@ -2,7 +2,7 @@ import { teamMembers, tickets, activityLogs } from "@shared/schema";
 import type { TeamMember, Ticket, ActivityLog, InsertTeamMember, InsertTicket, InsertActivityLog } from "@shared/schema";
 import { availableSkills } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc } from "drizzle-orm";
+import { eq, and, desc, ne, isNotNull } from "drizzle-orm";
 
 // Interface for storage operations
 export interface IStorage {
@@ -105,7 +105,8 @@ export class DatabaseStorage implements IStorage {
 
     // If assignedTo is provided, automatically assign the ticket
     if (ticket.assignedTo) {
-      return this.assignTicket(newTicket.id, ticket.assignedTo);
+      const assignedTicket = await this.assignTicket(newTicket.id, ticket.assignedTo);
+      return assignedTicket || newTicket;
     }
 
     return newTicket;
@@ -156,12 +157,20 @@ export class DatabaseStorage implements IStorage {
     if (!memberId) {
       const bestMember = await this.findBestTeamMember(ticket.skills);
       memberId = bestMember?.id;
-      if (!memberId) return ticket; // No suitable member found
+      if (!memberId) {
+        // No suitable member found, return the unchanged ticket
+        const [unchangedTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
+        return unchangedTicket;
+      }
     }
 
     // Check if member exists
     const [member] = await db.select().from(teamMembers).where(eq(teamMembers.id, memberId));
-    if (!member) return ticket;
+    if (!member) {
+      // Member not found, return the unchanged ticket
+      const [unchangedTicket] = await db.select().from(tickets).where(eq(tickets.id, ticketId));
+      return unchangedTicket;
+    }
 
     const now = new Date();
     const updateData = {
@@ -273,15 +282,10 @@ export class DatabaseStorage implements IStorage {
     const members = await this.getTeamMembers();
     
     // Count assigned tickets per member for load balancing
-    const assignedTickets = await db
-      .select()
-      .from(tickets)
-      .where(
-        and(
-          tickets.status.notEquals("completed"),
-          tickets.assignedTo.isNotNull
-        )
-      );
+    const allTickets = await db.select().from(tickets);
+    const assignedTickets = allTickets.filter(ticket => 
+      ticket.status !== "completed" && ticket.assignedTo !== null
+    );
     
     const assignedTicketCount = new Map<number, number>();
     for (const ticket of assignedTickets) {
